@@ -1,0 +1,6 @@
+cloudscraper
+beautifulsoup4
+black
+pylint
+mypy
+isort
