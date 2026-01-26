@@ -1,3 +1,8 @@
+"""
+Main application entry point. Handles user interaction,
+CLI interface for searching, and orchestration of scraping and storage.
+"""
+
 import sys
 from urllib.parse import urlparse
 
@@ -42,6 +47,29 @@ def process_selection(game):
     print("-" * 30)
 
 
+def handle_selection_loop(games):
+    while True:
+        choice = input(
+            "\nEnter number to download (or 'back' to search again): "
+        ).strip()
+        if choice.lower() in ["back", "b"]:
+            break
+
+        try:
+            selection_idx = int(choice) - 1
+            if 0 <= selection_idx < len(games):
+                process_selection(games[selection_idx])
+                continue_choice = input(
+                    "\nSelect another from this list? (y/n): "
+                ).lower()
+                if continue_choice != "y":
+                    break
+            else:
+                print("Invalid number.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+
 def main():
     print("=== PS PKG Scraper  ===")
     init_db()
@@ -68,26 +96,7 @@ def main():
             for idx, game in enumerate(games):
                 print(f"{idx + 1}. {game['title']}")
 
-            while True:
-                choice = input(
-                    "\nEnter number to download (or 'back' to search again): "
-                ).strip()
-                if choice.lower() in ["back", "b"]:
-                    break
-
-                try:
-                    selection_idx = int(choice) - 1
-                    if 0 <= selection_idx < len(games):
-                        process_selection(games[selection_idx])
-                        continue_choice = input(
-                            "\nSelect another from this list? (y/n): "
-                        ).lower()
-                        if continue_choice != "y":
-                            break
-                    else:
-                        print("Invalid number.")
-                except ValueError:
-                    print("Please enter a valid number.")
+            handle_selection_loop(games)
 
         except KeyboardInterrupt:
             print("\nExiting...")

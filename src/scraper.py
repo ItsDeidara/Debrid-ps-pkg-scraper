@@ -1,3 +1,8 @@
+"""
+Scraping module responsible for searching games and extracting download links
+from the target superpsx website using cloudscraper and BeautifulSoup.
+"""
+
 import re
 import urllib.parse
 
@@ -53,6 +58,24 @@ def search_games(search_query):
         return []
 
 
+def _extract_links_from_dl_page(scraper, dl_page_url):
+    links = []
+    try:
+        dl_resp = scraper.get(dl_page_url, timeout=15)
+        dl_soup = BeautifulSoup(dl_resp.content, "html.parser")
+
+        tables = dl_soup.select("table")
+        for table in tables:
+            for link in table.select("a[href]"):
+                href = link["href"]
+                if not any(domain in href for domain in IGNORE_DOMAINS):
+                    links.append(href)
+
+    except Exception as e:
+        print(f"DL page scraping failed: {e}")
+    return links
+
+
 def get_game_links(game_url, current_size="N/A"):
     scraper = get_scraper()
     final_links = []
@@ -74,20 +97,7 @@ def get_game_links(game_url, current_size="N/A"):
         )
 
         if dl_node:
-            dl_page_url = dl_node["href"]
-            try:
-                dl_resp = scraper.get(dl_page_url, timeout=15)
-                dl_soup = BeautifulSoup(dl_resp.content, "html.parser")
-
-                tables = dl_soup.select("table")
-                for table in tables:
-                    for link in table.select("a[href]"):
-                        href = link["href"]
-                        if not any(domain in href for domain in IGNORE_DOMAINS):
-                            final_links.append(href)
-
-            except Exception as e:
-                print(f"DL page scraping failed: {e}")
+            final_links = _extract_links_from_dl_page(scraper, dl_node["href"])
 
         return list(set(final_links)), new_size
 

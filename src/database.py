@@ -1,25 +1,31 @@
+"""
+Database persistence layer handling local file caching for game metadata.
+Manages loading, saving, and checking expiration of cached game details.
+"""
+
 import json
 import os
 import time
 
 CACHE_FILE = "games_cache.json"
-CACHE_TTL = 14400  # 4 hours
-_cache = {}
+CACHE_TTL = 3153600000
+_cache: dict = {}
 
 
 def init_db():
-    global _cache
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                _cache = json.load(f)
+                data = json.load(f)
+                _cache.clear()
+                _cache.update(data)
             print(f"Local cache loaded ({len(_cache)} items).")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(f"Error loading cache file: {e}")
-            _cache = {}
+            _cache.clear()
     else:
         print("No cache file found. Created new local cache.")
-        _cache = {}
+        _cache.clear()
 
 
 def get_cached_game(url):
@@ -40,8 +46,6 @@ def get_cached_game(url):
 
 
 def save_to_cache(game_data, links):
-    global _cache
-
     record = {
         "url": game_data["url"],
         "title": game_data["title"],
@@ -56,5 +60,5 @@ def save_to_cache(game_data, links):
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(_cache, f, indent=4)
-    except Exception as e:
+    except OSError as e:
         print(f"Failed to save cache to disk: {e}")
