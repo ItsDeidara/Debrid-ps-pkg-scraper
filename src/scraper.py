@@ -1,106 +1,225 @@
-"""
-Scraping module responsible for searching games and extracting download links
-from the target superpsx website using cloudscraper and BeautifulSoup.
-"""
-
 import re
 import urllib.parse
-
 import cloudscraper
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.superpsx.com/"
-IGNORE_DOMAINS = ["superpsx", "facebook", "twitter", "discord"]
 
+IGNORE_DOMAINS = [
+    "superpsx", "facebook", "twitter", "discord", 
+    "instagram", "pinterest", "youtube", "telegram",
+    "wp.com", "google.com"
+]
 
-def get_scraper():
-    return cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "mobile": False}
-    )
+class PSScraper:
+    def __init__(self):
+        self.scraper = cloudscraper.create_scraper(
+            browser={
+                "browser": "chrome",
+                "platform": "windows",
+                "mobile": False
+            }
+        )
 
+    def search_games(self, query):
+        params = {"s": query}
+        url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
 
-def search_games(search_query):
-    params = {"s": search_query}
-    url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
+        try:
+            response = self.scraper.get(url, timeout=15)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, "html.parser")
+            
+            results = []
+            items = soup.select("article.item")
 
-    try:
-        scraper = get_scraper()
-        response = scraper.get(url, timeout=15)
-        response.raise_for_status()
+            for item in items:
+                title_node = item.select_one(".penci-entry-title a")
+                if not title_node:
+                    continue
 
-        soup = BeautifulSoup(response.content, "html.parser")
-        results = []
+                img_node = item.select_one(".thumbnail")
+                image = img_node.get("data-bgset") if img_node else None
 
-        items = soup.select("li.grid-style article.item")
-
-        for item in items:
-            title_node = item.select_one("h2.penci-entry-title a")
-            if not title_node:
-                continue
-
-            img_node = item.select_one("div.thumbnail a")
-            image = img_node.get("data-bgset") if img_node else None
-
-            results.append(
-                {
+                results.append({
                     "title": title_node.get_text(strip=True),
                     "url": title_node["href"],
                     "image": image,
                     "downloads": "N/A",
                     "size": "N/A",
-                }
-            )
+                })
 
-        return results
+            return results
+        except Exception:
+            return []
 
-    except Exception as e:
-        print(f"Search failed: {e}")
-        return []
-
-
-def _extract_links_from_dl_page(scraper, dl_page_url):
-    links = []
-    try:
-        dl_resp = scraper.get(dl_page_url, timeout=15)
-        dl_soup = BeautifulSoup(dl_resp.content, "html.parser")
-
-        tables = dl_soup.select("table")
-        for table in tables:
-            for link in table.select("a[href]"):
+    def _extract_links(self, soup):
+        links = []
+        try:
+            potential_links = soup.find_all("a", href=True)
+            for link in potential_links:
                 href = link["href"]
-                if not any(domain in href for domain in IGNORE_DOMAINS):
-                    links.append(href)
+                if not any(domain in href.lower() for domain in IGNORE_DOMAINS):
+                    if href.startswith("http") and len(href) > 15:
+                        links.append(href)
 
-    except Exception as e:
-        print(f"DL page scraping failed: {e}")
-    return links
+        except Exception:
+            pass
+        return list(set(links))
 
+    def _extract_grouped_links(self, soup):
+        grouped_links = []
+        tables = soup.find_all("table")
+        found_structured_links = False
+        seen_urls = set()
 
-def get_game_links(game_url, current_size="N/A"):
-    scraper = get_scraper()
-    final_links = []
-    new_size = current_size
+        for table in tables:
+            block_name = "General / Misc"
+            
+            rows = table.find_all("tr")
+            if not rows: continue
 
-    try:
-        resp = scraper.get(game_url, timeout=15)
-        soup = BeautifulSoup(resp.content, "html.parser")
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) >= 2:
+                    header_text = cols[0].get_text(strip=True).lower()
+                    if "version" in header_text:
+                        val = cols[1].get_text(strip=True, separator=" ")
+                        clean_ver = re.sub(r'(?i)thanks?.*', '', val).strip()
+                        clean_ver = re.sub(r'[\u200b-\u200d\uFEFF]', '', clean_ver)
+                        if len(clean_ver) > 3:
+                            block_name = clean_ver
+                        break
+            
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) >= 1:
+                    row_label = "Link"
+                    content_col = None
+                    
+                    if len(cols) >= 2:
+                        row_label = cols[0].get_text(strip=True).replace("⇛", "").strip()
+                        content_col = cols[1]
+                    else:
+                        content_col = cols[0]
+                    
+                    if not content_col: continue
 
-        rows = soup.select("table.has-fixed-layout tr")
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) >= 2 and "size" in cols[0].get_text(strip=True).lower():
-                new_size = cols[1].get_text(strip=True)
-                break
+                    links = content_col.find_all("a", href=True)
+                    for link in links:
+                        href = link["href"]
+                        if not any(domain in href.lower() for domain in IGNORE_DOMAINS):
+                            if href.startswith("http") and len(href) > 15:
+                                if href not in seen_urls:
+                                    grouped_links.append({
+                                        "group": block_name,
+                                        "label": row_label if row_label else "Download",
+                                        "url": href
+                                    })
+                                    seen_urls.add(href)
+                                    found_structured_links = True
+        
+        if not found_structured_links:
+            raw = self._extract_links(soup)
+            return [{"group": "All Links", "label": "Link", "url": u} for u in raw]
+        
+        return grouped_links
 
-        dl_node = soup.select_one("a:has(img[alt='Download'])") or soup.find(
-            "a", href=re.compile(r"dll-")
-        )
+    def _parse_metadata(self, soup, metadata):
+        tables = soup.find_all("table")
+        for table in tables:
+            rows = table.find_all("tr")
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) >= 2:
+                    key_raw = cols[0].get_text(strip=True, separator=" ").lower()
+                    key = re.sub(r'[^\w\s]', '', key_raw).strip()
+                    val = cols[1].get_text(strip=True, separator=" ")
+                    
+                    if "size" in key or "tamanho" in key:
+                        metadata["size"] = val
+                    elif "password" in key or "senha" in key:
+                        metadata["password"] = val
+                    elif "version" in key or "versão" in key:
+                        if val.lower() != "n/a":
+                            clean_ver = re.sub(r'(?i)thanks?.*', '', val).strip()
+                            clean_ver = re.sub(r'[\u200b-\u200d\uFEFF]', '', clean_ver)
+                            
+                            curr_ver = metadata.get("version", "N/A")
+                            if curr_ver == "N/A":
+                                metadata["version"] = clean_ver
+                            elif clean_ver not in curr_ver:
+                                metadata["version"] = f"{curr_ver} | {clean_ver}"
+                        
+                        ids = re.findall(r'((?:CUSA|PPSA)\d{5})', val, re.IGNORECASE)
+                        for mid in ids:
+                            mid = mid.upper()
+                            curr_cusa = metadata.get("cusa", "N/A")
+                            if curr_cusa == "N/A":
+                                metadata["cusa"] = mid
+                            elif mid not in curr_cusa:
+                                metadata["cusa"] = f"{curr_cusa}, {mid}"
+                        
+                        found_region = None
+                        if "USA" in val: found_region = "USA"
+                        elif "EUR" in val: found_region = "EUR"
+                        elif "JPN" in val: found_region = "JPN"
+                        elif "ASIA" in val: found_region = "ASIA"
+                        
+                        if found_region:
+                            curr_reg = metadata.get("region", "N/A")
+                            if curr_reg == "N/A":
+                                metadata["region"] = found_region
+                            elif found_region not in curr_reg:
+                                metadata["region"] = f"{curr_reg}, {found_region}"
 
-        if dl_node:
-            final_links = _extract_links_from_dl_page(scraper, dl_node["href"])
+                    elif "voice" in key:
+                        if metadata["voice"] == "N/A":
+                            metadata["voice"] = val
+                    elif "subtitles" in key or "screen languages" in key:
+                        if metadata["subtitles"] == "N/A":
+                            metadata["subtitles"] = val
+                    elif "firmware" in key or "working" in key or "note" in key:
+                        if "working" in val.lower() or re.search(r'\d+\.xx', val) or re.search(r'\d+\.\d+', val):
+                            metadata["firmware"] = val
+        return metadata
 
-        return list(set(final_links)), new_size
+    def get_game_links(self, game_url, current_size="N/A"):
+        metadata = {
+            "size": current_size,
+            "version": "N/A",
+            "region": "N/A",
+            "password": "N/A",
+            "firmware": "N/A",
+            "voice": "N/A",
+            "subtitles": "N/A",
+            "cusa": "N/A"
+        }
 
-    except Exception as e:
-        print(f"Link extraction failed: {e}")
-        return [], new_size
+        try:
+            resp = self.scraper.get(game_url, timeout=15)
+            soup = BeautifulSoup(resp.content, "html.parser")
+            
+            self._parse_metadata(soup, metadata)
+
+            dl_node = soup.find("a", href=re.compile(r"dll-")) or \
+                      soup.select_one("a:has(img[alt*='Download'])")
+
+            if dl_node:
+                try:
+                    dl_url = dl_node["href"]
+                    dl_resp = self.scraper.get(dl_url, timeout=15)
+                    dl_soup = BeautifulSoup(dl_resp.content, "html.parser")
+                    
+                    self._parse_metadata(dl_soup, metadata)
+                    final_links = self._extract_grouped_links(dl_soup)
+                    
+                    if final_links:
+                        return final_links, metadata
+                except Exception:
+                    pass
+
+            final_links = self._extract_grouped_links(soup)
+            return final_links, metadata
+        except Exception:
+            return [], metadata

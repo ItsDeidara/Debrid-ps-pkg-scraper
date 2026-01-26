@@ -1,64 +1,58 @@
-"""
-Database persistence layer handling local file caching for game metadata.
-Manages loading, saving, and checking expiration of cached game details.
-"""
-
 import json
 import os
 import time
 
 CACHE_FILE = "games_cache.json"
-CACHE_TTL = 3153600000
-_cache: dict = {}
+CACHE_TTL = 31536000 
 
+class GameCache:
+    def __init__(self):
+        self._cache = {}
 
-def init_db():
-    if os.path.exists(CACHE_FILE):
+    def load(self):
+        if os.path.exists(CACHE_FILE):
+            try:
+                with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                    self._cache = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                self._cache = {}
+        else:
+            self._cache = {}
+
+    def get(self, url):
+        data = self._cache.get(url)
+        if not data:
+            return None
+
+        if "metadata" not in data:
+            return None
+
+        meta = data["metadata"]
+        if meta.get("version", "N/A") == "N/A" and meta.get("cusa", "N/A") == "N/A":
+            return None
+            
+        if not data.get("links"):
+            return None
+
+        timestamp = data.get("timestamp", 0)
+        if (time.time() - timestamp) > CACHE_TTL:
+            return None
+
+        return data
+
+    def save(self, game_data, links, metadata):
+        self._cache[game_data["url"]] = {
+            "url": game_data["url"],
+            "title": game_data["title"],
+            "size": metadata.get("size", "N/A"),
+            "downloads": game_data.get("downloads", "N/A"),
+            "links": links,
+            "metadata": metadata,
+            "timestamp": time.time(),
+        }
+
         try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                _cache.clear()
-                _cache.update(data)
-            print(f"Local cache loaded ({len(_cache)} items).")
-        except (OSError, json.JSONDecodeError) as e:
-            print(f"Error loading cache file: {e}")
-            _cache.clear()
-    else:
-        print("No cache file found. Created new local cache.")
-        _cache.clear()
-
-
-def get_cached_game(url):
-    data = _cache.get(url)
-
-    if data:
-        age = time.time() - data.get("timestamp", 0)
-
-        if age < CACHE_TTL:
-            return {
-                "title": data["title"],
-                "size": data["size"],
-                "links": data["links"],
-                "downloads": data.get("downloads", "N/A"),
-            }
-
-    return None
-
-
-def save_to_cache(game_data, links):
-    record = {
-        "url": game_data["url"],
-        "title": game_data["title"],
-        "size": game_data["size"],
-        "downloads": game_data.get("downloads", "N/A"),
-        "links": links,
-        "timestamp": time.time(),
-    }
-
-    _cache[game_data["url"]] = record
-
-    try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(_cache, f, indent=4)
-    except OSError as e:
-        print(f"Failed to save cache to disk: {e}")
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._cache, f, indent=4)
+        except OSError:
+            pass

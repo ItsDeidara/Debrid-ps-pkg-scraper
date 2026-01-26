@@ -1,109 +1,202 @@
-"""
-Main application entry point. Handles user interaction,
-CLI interface for searching, and orchestration of scraping and storage.
-"""
-
 import sys
 from urllib.parse import urlparse
+from itertools import groupby
 
-from src.database import get_cached_game, init_db, save_to_cache
-from src.scraper import get_game_links, search_games
+import questionary
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.live import Live
+from rich.status import Status
+from rich import box
+from rich.align import Align
+from rich.text import Text
 
+from src.database import GameCache
+from src.scraper import PSScraper
 
-def get_host_name(url):
-    try:
-        domain = urlparse(url).netloc
-        domain = domain.replace("www.", "").split(".")[0]
-        return domain.capitalize()
-    except Exception:
-        return "Link"
+console = Console()
 
+class PKGScraperCLI:
+    def __init__(self):
+        self.db = GameCache()
+        self.scraper = PSScraper()
+        self.db.load()
 
-def process_selection(game):
-    print(f"\n--- {game['title']} ---")
+    def get_host_name(self, url):
+        try:
+            domain = urlparse(url).netloc
+            parts = domain.replace("www.", "").split(".")
+            return parts[0].capitalize() if parts else "Link"
+        except Exception:
+            return "Link"
 
-    cached_data = get_cached_game(game["url"])
+    def display_game_details(self, game):
+        console.print(Panel(
+            Align.center(f"[bold cyan]{game['title']}[/bold cyan]"), 
+            box=box.ROUNDED, 
+            border_style="cyan",
+            expand=False,
+            padding=(1, 4)
+        ))
+        
+        cached_data = self.db.get(game["url"])
 
-    if cached_data:
-        print("[*] Loaded from cache")
-        links = cached_data["links"]
-        size = cached_data["size"]
-    else:
-        print("[*] Scraping live data (this may take a moment)...")
-        links, size = get_game_links(game["url"], game["size"])
+        if cached_data:
+            console.print(" [bold green]✓[/bold green] [italic]Loaded from local cache[/italic]")
+            links = cached_data["links"]
+            metadata = cached_data.get("metadata", {"size": cached_data.get("size", "N/A")})
+        else:
+            with console.status("[bold yellow]Scraping live data...[/bold yellow]", spinner="dots"):
+                links, metadata = self.scraper.get_game_links(game["url"], game["size"])
+                if links:
+                    game["size"] = metadata.get("size", "N/A")
+                    self.db.save(game, links, metadata)
+
+        grid = Table.grid(expand=True, padding=(0, 2))
+        grid.add_column(style="bold white")
+        grid.add_column(style="yellow")
+        grid.add_column(style="bold white")
+        grid.add_column(style="yellow")
+
+        region = metadata.get("region", "N/A")
+        cusa = metadata.get("cusa", "N/A")
+        reg_str = f"{region} ({cusa})" if region != "N/A" and cusa != "N/A" else (cusa if cusa != "N/A" else region)
+
+        grid.add_row("Size:", metadata.get("size", "N/A"), "Version:", metadata.get("version", "N/A"))
+        grid.add_row("Region:", reg_str, "Firmware:", metadata.get("firmware", "N/A"))
+        grid.add_row("Voice:", metadata.get("voice", "N/A"), "Subtitles:", metadata.get("subtitles", "N/A"))
+        
+        console.print(Panel(grid, title="Game Info", title_align="left", border_style="dim", padding=(0, 1)))
+
+        pwd = metadata.get("password")
+        if pwd and pwd.lower() != "n/a":
+             console.print(Panel(f"[bold white]Password: {pwd}[/bold white]", style="bold red", expand=False))
+        
+        console.print("")
+
         if links:
-            game["size"] = size
-            save_to_cache(game, links)
+            is_grouped = isinstance(links[0], dict)
 
-    print(f"Size: {size}")
+            if is_grouped:
+                links.sort(key=lambda x: x.get("group", "Misc"))
+                
+                for group_name, group_items in groupby(links, key=lambda x: x.get("group", "Misc")):
+                    table = Table(
+                        title=f"{group_name}", 
+                        title_style="bold magenta", 
+                        show_header=True, 
+                        header_style="bold white",
+                        box=box.SIMPLE,
+                        border_style="bright_black",
+                        expand=True,
+                        collapse_padding=True
+                    )
+                    table.add_column("Type", style="cyan", width=20)
+                    table.add_column("Host", style="yellow", width=15)
+                    table.add_column("URL", style="blue")
 
-    if links:
-        print("\nDownload Links:")
-        for link in links:
-            host = get_host_name(link)
-            print(f"- [{host}] {link}")
-    else:
-        print("No download links found.")
-    print("-" * 30)
-
-
-def handle_selection_loop(games):
-    while True:
-        choice = input(
-            "\nEnter number to download (or 'back' to search again): "
-        ).strip()
-        if choice.lower() in ["back", "b"]:
-            break
-
-        try:
-            selection_idx = int(choice) - 1
-            if 0 <= selection_idx < len(games):
-                process_selection(games[selection_idx])
-                continue_choice = input(
-                    "\nSelect another from this list? (y/n): "
-                ).lower()
-                if continue_choice != "y":
-                    break
+                    for item in group_items:
+                        url = item.get("url", "")
+                        label = item.get("label", "Link")
+                        host = self.get_host_name(url)
+                        table.add_row(label, host, url)
+                    
+                    console.print(table)
+                    console.print("")
             else:
-                print("Invalid number.")
-        except ValueError:
-            print("Please enter a valid number.")
+                table = Table(
+                    title="Download Mirrors", 
+                    title_style="bold magenta", 
+                    show_header=True, 
+                    header_style="bold white",
+                    box=box.SIMPLE,
+                    border_style="bright_black",
+                    pad_edge=False,
+                    collapse_padding=True
+                )
+                table.add_column("Host", style="cyan", width=15)
+                table.add_column("URL", style="blue")
 
+                sorted_links = sorted(links, key=lambda x: self.get_host_name(x))
+                for link in sorted_links:
+                    table.add_row(self.get_host_name(link), link)
+                
+                console.print(table)
+        else:
+            console.print("[bold red]× No download links found for this entry.[/bold red]")
+        
+        console.print("\n" + "[dim]━[/dim]" * 50 + "\n")
 
-def main():
-    print("=== PS PKG Scraper  ===")
-    init_db()
+    def run(self):
+        title_text = Text("PS PKG Scraper Pro", style="bold white")
+        subtitle = Text("Interactive Search & Scrape Tool", style="dim")
+        
+        console.print(Panel.fit(
+            Align.center(Text.assemble(title_text, "\n", subtitle)), 
+            border_style="blue",
+            box=box.DOUBLE,
+            padding=(1, 4)
+        ))
+        
+        while True:
+            try:
+                query = questionary.text(
+                    "Search Game (or press Esc to quit):",
+                    instruction="Enter name..."
+                ).ask()
 
-    while True:
-        try:
-            query = input("\nSearch Game (or 'exit' to quit): ").strip()
+                if query is None or query.lower() in ["exit", "quit", "q"]:
+                    console.print("[yellow]Exiting...[/yellow]")
+                    break
 
-            if query.lower() in ["exit", "quit", "q"]:
-                print("Goodbye!")
+                if not query.strip():
+                    continue
+
+                with console.status(f"[bold blue]Searching for '{query}'...[/bold blue]", spinner="earth"):
+                    games = self.scraper.search_games(query)
+
+                if not games:
+                    console.print("[bold red]! No games found. Try a different keyword.[/bold red]")
+                    continue
+
+                self.handle_selection(games)
+
+            except KeyboardInterrupt:
+                console.print("\n[bold red]! Operation cancelled.[/bold red]")
+                sys.exit(0)
+            except Exception as e:
+                console.print(f"[bold red]ERROR:[/bold red] {e}")
+
+    def handle_selection(self, games):
+        while True:
+            choices = [f"{i+1}. {g['title']}" for i, g in enumerate(games)]
+            choices.append(questionary.Separator())
+            choices.append("Back to search")
+
+            selected_text = questionary.select(
+                "Select a game:",
+                choices=choices,
+                style=questionary.Style([
+                    ('qmark', 'fg:cyan bold'),
+                    ('question', 'bold'),
+                    ('answer', 'fg:green bold'),
+                    ('pointer', 'fg:cyan bold'),
+                ])
+            ).ask()
+
+            if selected_text == "Back to search" or selected_text is None:
                 break
 
-            if not query:
-                continue
-
-            print(f"Searching for '{query}'...")
-            games = search_games(query)
-
-            if not games:
-                print("No games found.")
-                continue
-
-            print(f"\nFound {len(games)} results:")
-            for idx, game in enumerate(games):
-                print(f"{idx + 1}. {game['title']}")
-
-            handle_selection_loop(games)
-
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            sys.exit(0)
-        except Exception as e:
-            print(f"Error: {e}")
-
+            try:
+                idx = int(selected_text.split(".")[0]) - 1
+                self.display_game_details(games[idx])
+                
+                if not questionary.confirm("Return to results?").ask():
+                    break
+            except (ValueError, IndexError):
+                break
 
 if __name__ == "__main__":
-    main()
+    app = PKGScraperCLI()
+    app.run()
