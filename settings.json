@@ -1,0 +1,22 @@
+{
+    "scraper": {
+        "base_url": "https://www.superpsx.com/",
+        "timeout": 15,
+        "ignore_domains": [
+            "superpsx", 
+            "facebook", 
+            "twitter", 
+            "discord", 
+            "instagram", 
+            "pinterest", 
+            "youtube", 
+            "telegram", 
+            "wp.com", 
+            "google.com"
+        ]
+    },
+    "database": {
+        "cache_file": "games_cache.json",
+        "cache_ttl": 31536000
+    }
+}

@@ -3,13 +3,19 @@ import urllib.parse
 import cloudscraper
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://www.superpsx.com/"
 
-IGNORE_DOMAINS = [
-    "superpsx", "facebook", "twitter", "discord", 
+try:
+    from src.config import cfg
+except Exception:
+    cfg = None
+
+DEFAULT_BASE_URL = "https://www.superpsx.com/"
+DEFAULT_IGNORE_DOMAINS = [
+    "superpsx", "facebook", "twitter", "discord",
     "instagram", "pinterest", "youtube", "telegram",
     "wp.com", "google.com"
 ]
+DEFAULT_TIMEOUT = 15
 
 class PSScraper:
     def __init__(self):
@@ -20,13 +26,17 @@ class PSScraper:
                 "mobile": False
             }
         )
+        scraper_cfg = getattr(cfg, "scraper", {}) if cfg else {}
+        self.base_url = scraper_cfg.get("base_url", DEFAULT_BASE_URL)
+        self.ignore_domains = scraper_cfg.get("ignore_domains", DEFAULT_IGNORE_DOMAINS)
+        self.timeout = scraper_cfg.get("timeout", DEFAULT_TIMEOUT)
 
     def search_games(self, query):
         params = {"s": query}
-        url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
+        url = f"{self.base_url}?{urllib.parse.urlencode(params)}"
 
         try:
-            response = self.scraper.get(url, timeout=15)
+            response = self.scraper.get(url, timeout=self.timeout)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, "html.parser")
             
@@ -35,8 +45,7 @@ class PSScraper:
 
             for item in items:
                 title_node = item.select_one(".penci-entry-title a")
-                if not title_node:
-                    continue
+                if not title_node: continue
 
                 img_node = item.select_one(".thumbnail")
                 image = img_node.get("data-bgset") if img_node else None
@@ -59,10 +68,9 @@ class PSScraper:
             potential_links = soup.find_all("a", href=True)
             for link in potential_links:
                 href = link["href"]
-                if not any(domain in href.lower() for domain in IGNORE_DOMAINS):
+                if not any(domain in href.lower() for domain in self.ignore_domains):
                     if href.startswith("http") and len(href) > 15:
                         links.append(href)
-
         except Exception:
             pass
         return list(set(links))
@@ -108,7 +116,7 @@ class PSScraper:
                     links = content_col.find_all("a", href=True)
                     for link in links:
                         href = link["href"]
-                        if not any(domain in href.lower() for domain in IGNORE_DOMAINS):
+                        if not any(domain in href.lower() for domain in self.ignore_domains):
                             if href.startswith("http") and len(href) > 15:
                                 if href not in seen_urls:
                                     grouped_links.append({
@@ -197,7 +205,7 @@ class PSScraper:
         }
 
         try:
-            resp = self.scraper.get(game_url, timeout=15)
+            resp = self.scraper.get(game_url, timeout=self.timeout)
             soup = BeautifulSoup(resp.content, "html.parser")
             
             self._parse_metadata(soup, metadata)
@@ -208,7 +216,7 @@ class PSScraper:
             if dl_node:
                 try:
                     dl_url = dl_node["href"]
-                    dl_resp = self.scraper.get(dl_url, timeout=15)
+                    dl_resp = self.scraper.get(dl_url, timeout=self.timeout)
                     dl_soup = BeautifulSoup(dl_resp.content, "html.parser")
                     
                     self._parse_metadata(dl_soup, metadata)

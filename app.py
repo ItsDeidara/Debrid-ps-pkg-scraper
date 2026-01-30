@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from itertools import groupby
 
 import questionary
+import argparse
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -198,5 +199,18 @@ class PKGScraperCLI:
                 break
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="PS PKG Scraper CLI")
+    parser.add_argument("-s", "--search", type=str, help="Immediately search for a game")
+    args = parser.parse_args()
+
     app = PKGScraperCLI()
-    app.run()
+
+    if args.search:
+        console.print(f"[bold blue]Searching for '{args.search}'...[/bold blue]")
+        games = app.scraper.search_games(args.search)
+        if games:
+            app.handle_selection(games)
+        else:
+            console.print("[bold red]No games found.[/bold red]")
+    else:
+        app.run()

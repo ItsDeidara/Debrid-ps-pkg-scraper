@@ -2,8 +2,24 @@ import json
 import os
 import time
 
-CACHE_FILE = "games_cache.json"
-CACHE_TTL = 31536000 
+try:
+    from src.config import cfg  # type: ignore
+except Exception:
+    cfg = None
+
+DEFAULT_CACHE_FILE = "games_cache.json"
+DEFAULT_CACHE_TTL = 31536000
+
+if cfg and getattr(cfg, "database", None) is not None:
+    try:
+        CACHE_FILE = cfg.database.get("cache_file", DEFAULT_CACHE_FILE)
+        CACHE_TTL = cfg.database.get("cache_ttl", DEFAULT_CACHE_TTL)
+    except Exception:
+        CACHE_FILE = DEFAULT_CACHE_FILE
+        CACHE_TTL = DEFAULT_CACHE_TTL
+else:
+    CACHE_FILE = DEFAULT_CACHE_FILE
+    CACHE_TTL = DEFAULT_CACHE_TTL
 
 class GameCache:
     def __init__(self):
