@@ -8,3 +8,5 @@ mypy
 isort
 fastapi
 uvicorn
+slowapi
+redis
