@@ -1,2 +1,5 @@
 /src/__pycache__
 games_cache.json
+test_comment.py
+__pycache__/comment_remover.cpython-313.pyc
+comment_remover.py

@@ -6,3 +6,5 @@ black
 pylint
 mypy
 isort
+requests
+ttkthemes

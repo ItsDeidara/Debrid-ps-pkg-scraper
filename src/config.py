@@ -11,6 +11,15 @@ DEFAULTS = {
     "database": {
         "cache_file": "games_cache.json",
         "cache_ttl": 31536000
+    },
+    "apis": {
+        "real_debrid_api_key": ""
+    },
+    "ftp": {
+        "host": "",
+        "port": 21,
+        "username": "",
+        "password": ""
     }
 }
 
@@ -37,6 +46,14 @@ class Config:
     @property
     def database(self):
         return self.settings.get("database", DEFAULTS["database"])
+
+    @property
+    def apis(self):
+        return self.settings.get("apis", DEFAULTS["apis"])
+
+    @property
+    def ftp(self):
+        return self.settings.get("ftp", DEFAULTS["ftp"])
 
 # Create a singleton instance to be imported elsewhere
 cfg = Config()
