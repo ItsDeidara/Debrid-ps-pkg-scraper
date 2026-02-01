@@ -1,6 +1,7 @@
 # Debrid PS PKG Scraper GUI
 
 A dark-mode Tkinter application for searching and retrieving PS4/PS5 game download links, with integrated Real Debrid and inital FTP support.
+<img width="2076" height="1441" alt="image" src="https://github.com/user-attachments/assets/6e705f57-0879-4170-83a3-deaf0b598019" />
 
 ## Setup
 
